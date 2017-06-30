@@ -34,7 +34,7 @@ You can download the pretrained Word2Vec Model in this url: https://code.google.
 cd run_scripts
 bash train_ac_blstm.sh
 ```
-### G-AC-BLSTM on MR Dataset
+#### G-AC-BLSTM on MR Dataset
 ```bash
 cd run_scripts
 bash train_g_ac_blstm.sh
