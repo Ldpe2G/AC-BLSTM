@@ -19,6 +19,10 @@ BATCH_SIZE=50
 
 SAVE_MODRL_PATH=$ROOT/datas/trainModels
 
+if [ ! -d $SAVE_MODRL_PATH ] ; then
+  mkdir -p $SAVE_MODRL_PATH
+fi
+
 MR_DATA_PATH=$ROOT/datas/MR
 
 # pretrained word2vec file path

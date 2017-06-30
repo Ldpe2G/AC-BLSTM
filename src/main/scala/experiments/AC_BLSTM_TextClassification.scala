@@ -328,7 +328,7 @@ object AC_BLSTM_TextClassification {
 
         // end of training loop
         end = System.currentTimeMillis()
-        println(s"Iter $iter Train: Time: ${(end - start) / 1000}," +
+        println(s"Epoch $iter Training Time: ${(end - start) / 1000}," +
           s"Training Accuracy: ${numCorrect / numTotal * 100}%")
 
         // eval on dev set
@@ -362,12 +362,12 @@ object AC_BLSTM_TextClassification {
           }
         }
         val tmpAcc = numCorrect / numTotal
-        println(s"Dev Accuracy so far: ${tmpAcc * 100}%")
+        println(s"Epoch $iter Test Accuracy: ${tmpAcc * 100}%")
         if (tmpAcc > maxAccuracy) {
           maxAccuracy = tmpAcc
           Model.saveCheckpoint(s"$saveModelPath/cnn-text-dev-acc-$maxAccuracy",
             iter, model.symbol, model.cnnExec.argDict, model.cnnExec.auxDict)
-          println(s"max accuracy on dev so far: ${maxAccuracy  * 100}%")
+          println(s"Max accuracy on test set so far: ${maxAccuracy  * 100}%")
         }
 
         // decay learning rate

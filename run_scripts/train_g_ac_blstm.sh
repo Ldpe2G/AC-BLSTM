@@ -7,7 +7,7 @@ CLASS_PATH=$MXNET_JAR_FILE:$ROOT/target/scala-2.11/classes:$HOME/.ivy2/cache/org
 $HOME/.ivy2/cache/args4j/args4j/bundles/args4j-2.33.jar
 
 # to do 10-fold cross validation experiments, range from 0 ~ 9
-CROSS_VALIDATION_ID=0
+CROSS_VALIDATION_ID=1
 
 # -1 for cpu
 GPU=0
@@ -21,7 +21,11 @@ BATCH_SIZE=50
 G_BATCH=10 
 
 
-SAVE_MODRL_PATH=$ROOT/datas/trainModels
+SAVE_MODRL_PATH=$ROOT/datas/trainGModels
+
+if [ ! -d $SAVE_MODRL_PATH ] ; then
+  mkdir -p $SAVE_MODRL_PATH
+fi
 
 MR_DATA_PATH=$ROOT/datas/MR
 
