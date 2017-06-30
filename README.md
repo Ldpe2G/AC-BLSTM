@@ -1,5 +1,5 @@
 # AC-BLSTM 
-MXNet Scala module implementation of my work [AC-BLSTM](https://arxiv.org/abs/1611.01884).
+MXNet Scala module implementation of my work [AC-BLSTM[1]](https://arxiv.org/abs/1611.01884).
 
 # Setup
 ## Environment
@@ -47,4 +47,7 @@ By the way, If you can successfully reproduce the result reported in the paper, 
 If not, God konws what happen :( . 
 
 May the force be with you :) .....
+
+## References
+[1] Liang, Depeng, and Yongdong Zhang. "AC-BLSTM: Asymmetric Convolutional Bidirectional LSTM Networks for Text Classification." arXiv preprint arXiv:1611.01884 (2016).
 
