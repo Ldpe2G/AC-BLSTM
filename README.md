@@ -40,11 +40,11 @@ cd run_scripts
 bash train_g_ac_blstm.sh
 ```
 
-Because I was doing the 10-fold cross-validation on MR dataset, you can modify the `CROSS_VALIDATION_ID=` flag from 0 to 9 for the cross-validation expriements.
+Because I was doing the 10-fold cross-validation on MR dataset, so you can modify the `CROSS_VALIDATION_ID=` flag from 0 to 9 for the cross-validation expriements.
 
 By the way, If you can successfully reproduce the result reported in the paper, congratulations :) . 
 
-If not, God konws what happen :( . 
+If not, God knows what happen :( . 
 
 May the force be with you :) .....
 
