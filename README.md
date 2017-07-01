@@ -10,6 +10,7 @@ Tested on Ubuntu 14.04, using CUDA 8.0.61.
 For more details how to build MXNet from source pls refer to: http://mxnet.io/get_started/ubuntu_setup.html.
 
 #### Requirements to Build MXNet-Scala-Package
+* Java 8
 * [maven](https://maven.apache.org/download.cgi)
 
 For more details how to build MXNet-Scala-Package pls refer to: http://mxnet.io/get_started/ubuntu_setup.html#install-the-mxnet-package-for-scala.
