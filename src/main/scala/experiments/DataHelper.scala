@@ -5,9 +5,9 @@ import java.io.BufferedInputStream
 import java.io.FileInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import ml.dmlc.mxnet.Random
-import ml.dmlc.mxnet.Context
-import ml.dmlc.mxnet.Shape
+import org.apache.mxnet.Random
+import org.apache.mxnet.Context
+import org.apache.mxnet.Shape
 
 /**
  * @author Depeng Liang
