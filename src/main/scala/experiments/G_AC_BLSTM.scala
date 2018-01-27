@@ -3,20 +3,20 @@ package experiments
 import org.kohsuke.args4j.{ CmdLineParser, Option }
 import org.slf4j.LoggerFactory
 import scala.collection.JavaConverters._
-import ml.dmlc.mxnet.Initializer
-import ml.dmlc.mxnet.Uniform
-import ml.dmlc.mxnet.Context
-import ml.dmlc.mxnet.Symbol
-import ml.dmlc.mxnet.Shape
-import ml.dmlc.mxnet.NDArray
-import ml.dmlc.mxnet.Executor
-import ml.dmlc.mxnet.optimizer.RMSProp
-import ml.dmlc.mxnet.Optimizer
-import ml.dmlc.mxnet.Model
+import org.apache.mxnet.Initializer
+import org.apache.mxnet.Uniform
+import org.apache.mxnet.Context
+import org.apache.mxnet.Symbol
+import org.apache.mxnet.Shape
+import org.apache.mxnet.NDArray
+import org.apache.mxnet.Executor
+import org.apache.mxnet.optimizer.RMSProp
+import org.apache.mxnet.Optimizer
+import org.apache.mxnet.Model
 import scala.util.Random
-import ml.dmlc.mxnet.Xavier
-import ml.dmlc.mxnet.optimizer.AdaDelta
-import ml.dmlc.mxnet.optimizer.Adam
+import org.apache.mxnet.Xavier
+import org.apache.mxnet.optimizer.AdaDelta
+import org.apache.mxnet.optimizer.Adam
 import Ops._
 import scala.io.Source
 
@@ -383,7 +383,7 @@ object G_AC_BLSTM {
 
         // draw samples from Generator, ganBatch
         val randomInput =
-          ml.dmlc.mxnet.Random.normal(0, 1.0f, ganModel.data.shape, ganModel.data.context)
+          org.apache.mxnet.Random.normal(0, 1.0f, ganModel.data.shape, ganModel.data.context)
 
         ganModel.data.set(randomInput)
         ganModel.ganExec.forward(isTrain = true)
