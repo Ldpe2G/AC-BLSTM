@@ -19,6 +19,7 @@ import ml.dmlc.mxnet.optimizer.AdaDelta
 import ml.dmlc.mxnet.optimizer.Adam
 import java.io.PrintWriter
 import scala.io.Source
+import scala.collection.mutable.ArrayBuffer
 
 /**
  * An Implementation of the paper
@@ -80,6 +81,10 @@ object AC_BLSTM_TextClassification {
 
     // add dropout before conv layers
     if (dropout > 0f) inputX = Symbol.Dropout()()(Map("data" -> inputX, "p" -> dropout))
+    
+    val newNumFilter = numFilter
+    val totalDim = newNumFilter * filterList.length
+    var seqLen = sentenceSize - filterList.sorted.reverse.head + 1
 
     val windowSeqOutputs = filterList.map { filterSize =>
       // inception v4 2 
@@ -88,33 +93,30 @@ object AC_BLSTM_TextClassification {
       var bn = Symbol.BatchNorm()()(Map("data" -> conv))
       var relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
       
-      val outs = sentenceSize - filterSize + 1
+      val len = sentenceSize - filterSize + 1
      
       conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
           "num_filter" -> numFilter, "cudnn_off" -> true, "dilate" -> "(1, 1)"))
       bn = Symbol.BatchNorm()()(Map("data" -> conv))
       relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
    
-      val windowSeq = Symbol.SliceChannel()(relu)(Map("axis" -> 2, "num_outputs" -> outs, "squeeze_axis" -> 1))     
-
-      (Array[Symbol]() /: (0 until outs)) { (acc, idx) => acc :+ windowSeq.get(idx) }
+      if (len > seqLen) {
+        val partOne = Symbol.slice_axis()()(
+            Map("data" -> relu, "axis" -> 2, "begin" -> 0, "end" -> (seqLen - 1)))
+        var partTwo = Symbol.slice_axis()()(
+            Map("data" -> relu, "axis" -> 2, "begin" -> (seqLen - 1), "end" -> len))
+        partTwo = Symbol.Flatten()(partTwo)()
+        partTwo = Symbol.FullyConnected()()(Map("data" -> partTwo, "num_hidden" -> newNumFilter))
+        partTwo = Symbol.Reshape()()(Map("data" -> partTwo, "target_shape" -> s"($batchSize, $numFilter, 1, 1)"))
+        Symbol.Concat()(partOne, partTwo)(Map("dim" -> 2))
+      } else relu
     }
-    val newNumFilter = numFilter
-    val totalDim = newNumFilter * filterList.length
-    var seqLen = sentenceSize - filterList.sorted.reverse.head + 1
-
-    windowSeqOutputs.filter(_.length > seqLen).foreach { syms =>
-      val rights = syms.takeRight(syms.length - seqLen + 1)
-      val concats = Symbol.Concat()(rights: _*)(Map("dim" -> 1))
-      syms(seqLen - 1) = Symbol.FullyConnected()()(Map("data" -> concats, "num_hidden" -> newNumFilter))
+    
+    val lstmInputs = {
+      val concats = Symbol.Concat()(windowSeqOutputs: _*)(Map("dim" -> 1))
+      Symbol.SliceChannel()(concats)(Map("axis" -> 2, "num_outputs" -> seqLen, "squeeze_axis" -> 1))
     }
-
-    val lstmInputs = (for (t <- 0 until seqLen) yield {
-      val syms = windowSeqOutputs.map { w => w(t) }
-      val concate = Symbol.Concat()(syms: _*)(Map("dim" -> 1))
-      Symbol.Reshape()()(Map("data" -> concate, "target_shape" -> s"($batchSize, $totalDim)"))
-    }).toArray
-
+    
     // bi-lstm
     var forwardParamCells = Array[LSTMParam]()
     var forwardLastStates = Array[LSTMState]()
@@ -139,13 +141,13 @@ object AC_BLSTM_TextClassification {
                                                                       h = Symbol.Variable(s"b_l${i}_init_h"))
     }
     assert(backwardLastStates.length == numLstmLayer)
-
+    
     // forward
     var forwardHiddenAll = Array[Symbol]()
     var dpRatio = 0f
     var hidden: Symbol = null
     for (seqIdx <- 0 until seqLen) {
-      hidden = lstmInputs(seqIdx)      
+      hidden = lstmInputs.get(seqIdx)      
       // stack LSTM
       for (i <- 0 until numLstmLayer) {
         if (i == 0) dpRatio = 0f else dpRatio = dropout
@@ -166,7 +168,7 @@ object AC_BLSTM_TextClassification {
     dpRatio = 0f
     for (seqIdx <- 0 until seqLen) {
       val k = seqLen - seqIdx - 1
-      hidden = lstmInputs(k)    
+      hidden = lstmInputs.get(k)    
       // stack LSTM
       for (i <- 0 until numLstmLayer) {
         if (i == 0) dpRatio = 0f else dpRatio = dropout
@@ -298,7 +300,7 @@ object AC_BLSTM_TextClassification {
           model.cnnExec.backward()
 
           val tmpCorrect = {
-            val predLabel = NDArray.argmaxChannel(model.cnnExec.outputs(0))
+            val predLabel = NDArray.argmax_channel(model.cnnExec.outputs(0))
             val result = predLabel.toArray.zip(batchL).map { predLabel =>
               if (predLabel._1 == predLabel._2) 1
               else 0
@@ -350,7 +352,7 @@ object AC_BLSTM_TextClassification {
             model.cnnExec.forward(isTrain = false)
 
             val tmpCorrect = {
-              val predLabel = NDArray.argmaxChannel(model.cnnExec.outputs(0))
+              val predLabel = NDArray.argmax_channel(model.cnnExec.outputs(0))
               val result = predLabel.toArray.zip(batchL).map { predLabel =>
                 if (predLabel._1 == predLabel._2) 1
                 else 0
@@ -385,7 +387,6 @@ object AC_BLSTM_TextClassification {
     val parser: CmdLineParser = new CmdLineParser(exon)
     try {
       parser.parseArgument(args.toList.asJava)
-
       println("Loading data...")
       
       var (numEmbed, word2vec) =
@@ -433,6 +434,7 @@ object AC_BLSTM_TextClassification {
           filterList = Array(2, 3, 4),
           initializer = new Xavier(factorType = "in", magnitude = 2.34f),
           resumeModelPath = exon.resumeModelPath)
+          
       trainCNN(cnnModel, trainDats, trainLabels, devDatas, devLabels, exon.batchSize,
           exon.saveModelPath, learningRate = exon.lr)
 

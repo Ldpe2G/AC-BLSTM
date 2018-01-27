@@ -75,58 +75,59 @@ object G_AC_BLSTM {
   }
 
   def makeTextCNN(sentenceSize: Int, numEmbed: Int, batchSize: Int, numHidden: Int, numLstmLayer: Int = 1,
-                  numLabel: Int = 2, filterList: Array[Int] = Array(3, 4, 5), numFilter: Int = 100, dropout: Float = 0.5f): Symbol = {
+    numLabel: Int = 2, filterList: Array[Int] = Array(3, 4, 5), numFilter: Int = 100, dropout: Float = 0.5f): Symbol = {
 
     var inputX = Symbol.Variable("data")
     val inputY = Symbol.Variable("softmax_label")
 
     // add dropout before conv layers
     if (dropout > 0f) inputX = Symbol.Dropout()()(Map("data" -> inputX, "p" -> dropout))
-
-    val windowSeqOutputs = filterList.map { filterSize =>
-      // inception v4 2 
-      var conv = Symbol.Convolution()()(Map("data" -> inputX, "kernel" -> s"(1, $numEmbed)",
-        "num_filter" -> numFilter, "cudnn_off" -> true))
-      var bn = Symbol.BatchNorm()()(Map("data" -> conv))
-      var relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
-
-      val outs = sentenceSize - filterSize + 1
-
-      conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
-        "num_filter" -> numFilter, "cudnn_off" -> true/*, "dilate" -> "(1, 1)"*/))
-      bn = Symbol.BatchNorm()()(Map("data" -> conv))
-      relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
-
-      val windowSeq = Symbol.SliceChannel()(relu)(Map("axis" -> 2, "num_outputs" -> outs, "squeeze_axis" -> 1))
-
-      (Array[Symbol]() /: (0 until outs)) { (acc, idx) => acc :+ windowSeq.get(idx) }
-    }
+    
     val newNumFilter = numFilter
     val totalDim = newNumFilter * filterList.length
     var seqLen = sentenceSize - filterList.sorted.reverse.head + 1
 
-    windowSeqOutputs.filter(_.length > seqLen).foreach { syms =>
-      val rights = syms.takeRight(syms.length - seqLen + 1)
-      val concats = Symbol.Concat()(rights: _*)(Map("dim" -> 1))
-      syms(seqLen - 1) = Symbol.FullyConnected()()(Map("data" -> concats, "num_hidden" -> newNumFilter))
+    val windowSeqOutputs = filterList.map { filterSize =>
+      // inception v4 2 
+      var conv = Symbol.Convolution()()(Map("data" -> inputX, "kernel" -> s"(1, $numEmbed)",
+          "num_filter" -> numFilter, "cudnn_off" -> true))
+      var bn = Symbol.BatchNorm()()(Map("data" -> conv))
+      var relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
+      
+      val len = sentenceSize - filterSize + 1
+     
+      conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
+          "num_filter" -> numFilter, "cudnn_off" -> true, "dilate" -> "(1, 1)"))
+      bn = Symbol.BatchNorm()()(Map("data" -> conv))
+      relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
+   
+      if (len > seqLen) {
+        val partOne = Symbol.slice_axis()()(
+            Map("data" -> relu, "axis" -> 2, "begin" -> 0, "end" -> (seqLen - 1)))
+        var partTwo = Symbol.slice_axis()()(
+            Map("data" -> relu, "axis" -> 2, "begin" -> (seqLen - 1), "end" -> len))
+        partTwo = Symbol.Flatten()(partTwo)()
+        partTwo = Symbol.FullyConnected()()(Map("data" -> partTwo, "num_hidden" -> newNumFilter))
+        partTwo = Symbol.Reshape()()(Map("data" -> partTwo, "target_shape" -> s"($batchSize, $numFilter, 1, 1)"))
+        Symbol.Concat()(partOne, partTwo)(Map("dim" -> 2))
+      } else relu
     }
-
-    val lstmInputs = (for (t <- 0 until seqLen) yield {
-      val syms = windowSeqOutputs.map { w => w(t) }
-      val concate = Symbol.Concat()(syms: _*)(Map("dim" -> 1))
-      Symbol.Reshape()()(Map("data" -> concate, "target_shape" -> s"($batchSize, $totalDim)"))
-    }).toArray
-
-    // try bi-lstm
+    
+    val lstmInputs = {
+      val concats = Symbol.Concat()(windowSeqOutputs: _*)(Map("dim" -> 1))
+      Symbol.SliceChannel()(concats)(Map("axis" -> 2, "num_outputs" -> seqLen, "squeeze_axis" -> 1))
+    }
+    
+    // bi-lstm
     var forwardParamCells = Array[LSTMParam]()
     var forwardLastStates = Array[LSTMState]()
     for (i <- 0 until numLstmLayer) {
       forwardParamCells = forwardParamCells :+ LSTMParam(i2hWeight = Symbol.Variable(s"f_l${i}_i2h_weight"),
-        i2hBias = Symbol.Variable(s"f_l${i}_i2h_bias"),
-        h2hWeight = Symbol.Variable(s"f_l${i}_h2h_weight"),
-        h2hBias = Symbol.Variable(s"f_l${i}_h2h_bias"))
+                                                       i2hBias = Symbol.Variable(s"f_l${i}_i2h_bias"),
+                                                       h2hWeight = Symbol.Variable(s"f_l${i}_h2h_weight"),
+                                                       h2hBias = Symbol.Variable(s"f_l${i}_h2h_bias"))
       forwardLastStates = forwardLastStates :+ LSTMState(c = Symbol.Variable(s"f_l${i}_init_c"),
-        h = Symbol.Variable(s"f_l${i}_init_h"))
+                                                                      h = Symbol.Variable(s"f_l${i}_init_h"))
     }
     assert(forwardLastStates.length == numLstmLayer)
 
@@ -134,27 +135,27 @@ object G_AC_BLSTM {
     var backwardLastStates = Array[LSTMState]()
     for (i <- 0 until numLstmLayer) {
       backwardParamCells = backwardParamCells :+ LSTMParam(i2hWeight = Symbol.Variable(s"b_l${i}_i2h_weight"),
-        i2hBias = Symbol.Variable(s"b_l${i}_i2h_bias"),
-        h2hWeight = Symbol.Variable(s"b_l${i}_h2h_weight"),
-        h2hBias = Symbol.Variable(s"b_l${i}_h2h_bias"))
+                                                       i2hBias = Symbol.Variable(s"b_l${i}_i2h_bias"),
+                                                       h2hWeight = Symbol.Variable(s"b_l${i}_h2h_weight"),
+                                                       h2hBias = Symbol.Variable(s"b_l${i}_h2h_bias"))
       backwardLastStates = backwardLastStates :+ LSTMState(c = Symbol.Variable(s"b_l${i}_init_c"),
-        h = Symbol.Variable(s"b_l${i}_init_h"))
+                                                                      h = Symbol.Variable(s"b_l${i}_init_h"))
     }
     assert(backwardLastStates.length == numLstmLayer)
-
+    
     // forward
     var forwardHiddenAll = Array[Symbol]()
     var dpRatio = 0f
     var hidden: Symbol = null
     for (seqIdx <- 0 until seqLen) {
-      hidden = lstmInputs(seqIdx)
+      hidden = lstmInputs.get(seqIdx)      
       // stack LSTM
       for (i <- 0 until numLstmLayer) {
         if (i == 0) dpRatio = 0f else dpRatio = dropout
         val nextState = lstm(numHidden, inData = hidden,
-          prevState = forwardLastStates(i),
-          param = forwardParamCells(i),
-          seqIdx = seqIdx, layerIdx = i, dropout = dpRatio)
+                                prevState = forwardLastStates(i),
+                                param = forwardParamCells(i),
+                                seqIdx = seqIdx, layerIdx = i, dropout = dpRatio)
         hidden = nextState.h
         forwardLastStates(i) = nextState
       }
@@ -168,32 +169,30 @@ object G_AC_BLSTM {
     dpRatio = 0f
     for (seqIdx <- 0 until seqLen) {
       val k = seqLen - seqIdx - 1
-      hidden = lstmInputs(k)
+      hidden = lstmInputs.get(k)    
       // stack LSTM
       for (i <- 0 until numLstmLayer) {
         if (i == 0) dpRatio = 0f else dpRatio = dropout
         val nextState = lstm(numHidden, inData = hidden,
-          prevState = backwardLastStates(i),
-          param = backwardParamCells(i),
-          seqIdx = k, layerIdx = i, dropout = dpRatio)
+                                prevState = backwardLastStates(i),
+                                param = backwardParamCells(i),
+                                seqIdx = k, layerIdx = i, dropout = dpRatio)
         hidden = nextState.h
         backwardLastStates(i) = nextState
       }
       //  add dropout before softmax
       if (dropout > 0f) hidden = Symbol.Dropout()()(Map("data" -> hidden, "p" -> dropout))
-      badkwardHiddenAll = hidden +: badkwardHiddenAll
+      badkwardHiddenAll =  hidden +: badkwardHiddenAll
     }
 
-    val syms = forwardHiddenAll.zip(badkwardHiddenAll).map {
-      case (f, b) =>
-        var tmp = Symbol.Concat()(f, b)(Map("dim" -> 1))
-        Symbol.Dropout()()(Map("data" -> tmp, "p" -> 0.5f))
+    val syms = forwardHiddenAll.zip(badkwardHiddenAll).map { case (f, b) =>
+      var tmp = Symbol.Concat()(f, b)(Map("dim" -> 1))
+      Symbol.Dropout()()(Map("data" -> tmp, "p" -> 0.5f))
     }
+
     var hiddenConcat = Symbol.Concat()(syms: _*)(Map("dim" -> 1))
-
     val fc = Symbol.FullyConnected()()(Map("data" -> hiddenConcat, "num_hidden" -> numLabel))
     val sm = Symbol.SoftmaxOutput()()(Map("data" -> fc, "label" -> inputY))
-
     sm
   }
 
@@ -407,7 +406,7 @@ object G_AC_BLSTM {
         ganModel.ganExec.backward(fakeArr)
 
         val tmpCorrect = {
-          val predLabel = NDArray.argmaxChannel(model.cnnExec.outputs(0))
+          val predLabel = NDArray.argmax_channel(model.cnnExec.outputs(0))
           val result = predLabel.toArray.zip(batchL).map { predLabel =>
             if (predLabel._1 == predLabel._2) 1
             else 0
