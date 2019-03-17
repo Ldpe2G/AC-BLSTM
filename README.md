@@ -7,11 +7,16 @@ Tested on Ubuntu 14.04, using CUDA 8.0.61.
 
 ## Build Steps
 ### Build MXNet
+
+make -j4 USE_MKLDNN=0 USE_CUDA=1 USE_CUDA_PATH=/usr/local/cuda USE_CUDNN=1
+
 For more details how to build MXNet from source pls refer to: http://mxnet.io/get_started/ubuntu_setup.html.
 
 #### Requirements to Build MXNet-Scala-Package
 * Java 8
 * [maven](https://maven.apache.org/download.cgi)
+
+make scalapkg
 
 For more details how to build MXNet-Scala-Package pls refer to: http://mxnet.io/get_started/ubuntu_setup.html#install-the-mxnet-package-for-scala.
 
