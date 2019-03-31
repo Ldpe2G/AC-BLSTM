@@ -1,3 +1,5 @@
+[![996.ICU](https://img.shields.io/badge/link-996.icu-red.svg)](https://996.icu/#/en_US)
+
 # AC-BLSTM 
 MXNet Scala module implementation of my work [AC-BLSTM[1]](https://arxiv.org/abs/1611.01884).
 
