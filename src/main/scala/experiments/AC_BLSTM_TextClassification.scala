@@ -3,23 +3,26 @@ package experiments
 import org.kohsuke.args4j.{CmdLineParser, Option}
 import org.slf4j.LoggerFactory
 import scala.collection.JavaConverters._
-import ml.dmlc.mxnet.Initializer
-import ml.dmlc.mxnet.Uniform
-import ml.dmlc.mxnet.Context
-import ml.dmlc.mxnet.Symbol
-import ml.dmlc.mxnet.Shape
-import ml.dmlc.mxnet.NDArray
-import ml.dmlc.mxnet.Executor
-import ml.dmlc.mxnet.optimizer.RMSProp
-import ml.dmlc.mxnet.Optimizer
-import ml.dmlc.mxnet.Model
+import org.apache.mxnet.Initializer
+import org.apache.mxnet.Uniform
+import org.apache.mxnet.Context
+import org.apache.mxnet.Symbol
+import org.apache.mxnet.Shape
+import org.apache.mxnet.NDArray
+import org.apache.mxnet.Executor
+import org.apache.mxnet.optimizer.RMSProp
+import org.apache.mxnet.Optimizer
+import org.apache.mxnet.Model
+
+import org.apache.mxnet.Xavier
+import org.apache.mxnet.optimizer.AdaDelta
+import org.apache.mxnet.optimizer.Adam
+
 import scala.util.Random
-import ml.dmlc.mxnet.Xavier
-import ml.dmlc.mxnet.optimizer.AdaDelta
-import ml.dmlc.mxnet.optimizer.Adam
 import java.io.PrintWriter
 import scala.io.Source
 import scala.collection.mutable.ArrayBuffer
+import org.apache.mxnet.util.OptionConversion._
 
 /**
  * An Implementation of the paper
@@ -50,26 +53,38 @@ object AC_BLSTM_TextClassification {
     dropout: Float = 0f): LSTMState = {
 
     val inDataa = {
-      if (dropout > 0f) Symbol.Dropout()()(Map("data" -> inData, "p" -> dropout))
+      if (dropout > 0f) 
+//        Symbol.Dropout()()(Map("data" -> inData, "p" -> dropout))
+        Symbol.api.Dropout(inData, dropout)
       else inData
     }
-    val i2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_i2h")()(Map("data" -> inDataa,
-                                                       "weight" -> param.i2hWeight,
-                                                       "bias" -> param.i2hBias,
-                                                       "num_hidden" -> numHidden * 4))
-    val h2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_h2h")()(Map("data" -> prevState.h,
-                                                       "weight" -> param.h2hWeight,
-                                                       "bias" -> param.h2hBias,
-                                                       "num_hidden" -> numHidden * 4))
+//    val i2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_i2h")()(Map("data" -> inDataa,
+//                                                       "weight" -> param.i2hWeight,
+//                                                       "bias" -> param.i2hBias,
+//                                                       "num_hidden" -> numHidden * 4))
+    val i2h = Symbol.api.FullyConnected(inDataa, param.i2hWeight, param.i2hBias, numHidden * 4, name = s"t${seqIdx}_l${layerIdx}_i2h")                                                   
+//    val h2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_h2h")()(Map("data" -> prevState.h,
+//                                                       "weight" -> param.h2hWeight,
+//                                                       "bias" -> param.h2hBias,
+//                                                       "num_hidden" -> numHidden * 4))
+    val h2h = Symbol.api.FullyConnected(prevState.h, param.h2hWeight, param.h2hBias, numHidden * 4, name = s"t${seqIdx}_l${layerIdx}_h2h")
+    
     val gates = i2h + h2h
-    val sliceGates = Symbol.SliceChannel(s"t${seqIdx}_l${layerIdx}_slice")(gates)(
-        Map("num_outputs" -> 4))
-    val ingate = Symbol.Activation()()(Map("data" -> sliceGates.get(0), "act_type" -> "sigmoid"))
-    val inTransform = Symbol.Activation()()(Map("data" -> sliceGates.get(1), "act_type" -> "tanh"))
-    val forgetGate = Symbol.Activation()()(Map("data" -> sliceGates.get(2), "act_type" -> "sigmoid"))
-    val outGate = Symbol.Activation()()(Map("data" -> sliceGates.get(3), "act_type" -> "sigmoid"))
+//    val sliceGates = Symbol.SliceChannel(s"t${seqIdx}_l${layerIdx}_slice")(gates)(Map("num_outputs" -> 4))
+    
+    val sliceGates = Symbol.api.SliceChannel(gates, num_outputs = 4, name = s"t${seqIdx}_l${layerIdx}_slice")
+    
+//    val ingate = Symbol.Activation()()(Map("data" -> sliceGates.get(0), "act_type" -> "sigmoid"))
+    val ingate = Symbol.api.sigmoid(sliceGates.get(0))
+//    val inTransform = Symbol.Activation()()(Map("data" -> sliceGates.get(1), "act_type" -> "tanh"))
+    val inTransform = Symbol.api.tanh(sliceGates.get(1))
+//    val forgetGate = Symbol.Activation()()(Map("data" -> sliceGates.get(2), "act_type" -> "sigmoid"))
+    val forgetGate = Symbol.api.sigmoid(sliceGates.get(2))
+//    val outGate = Symbol.Activation()()(Map("data" -> sliceGates.get(3), "act_type" -> "sigmoid"))
+    val outGate = Symbol.api.sigmoid(sliceGates.get(3))
     val nextC = (forgetGate * prevState.c) + (ingate * inTransform)
-    val nextH = outGate * Symbol.Activation()()(Map("data" -> nextC, "act_type" -> "tanh"))
+//    val nextH = outGate * Symbol.Activation()()(Map("data" -> nextC, "act_type" -> "tanh"))
+    val nextH = outGate * Symbol.api.tanh(nextC)
     LSTMState(c = nextC, h = nextH)
   }
 
@@ -80,41 +95,43 @@ object AC_BLSTM_TextClassification {
     val inputY = Symbol.Variable("softmax_label")
 
     // add dropout before conv layers
-    if (dropout > 0f) inputX = Symbol.Dropout()()(Map("data" -> inputX, "p" -> dropout))
-    
+    if (dropout > 0f) inputX = Symbol.api.Dropout(inputX, dropout)
+
     val newNumFilter = numFilter
     val totalDim = newNumFilter * filterList.length
     var seqLen = sentenceSize - filterList.sorted.reverse.head + 1
 
     val windowSeqOutputs = filterList.map { filterSize =>
       // inception v4 2 
-      var conv = Symbol.Convolution()()(Map("data" -> inputX, "kernel" -> s"(1, $numEmbed)",
-          "num_filter" -> numFilter, "cudnn_off" -> true))
-      var bn = Symbol.BatchNorm()()(Map("data" -> conv))
-      var relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
+//      var conv = Symbol.Convolution()()(Map("data" -> inputX, "kernel" -> s"(1, $numEmbed)",
+//          "num_filter" -> numFilter, "cudnn_off" -> true))
+      var conv = Symbol.api.Convolution(inputX, kernel = Shape(1, numEmbed), num_filter = numFilter, cudnn_off = true)
+      var bn = Symbol.api.BatchNorm(conv)
+      var relu = Symbol.api.relu(bn)
       
       val len = sentenceSize - filterSize + 1
      
-      conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
-          "num_filter" -> numFilter, "cudnn_off" -> true, "dilate" -> "(1, 1)"))
-      bn = Symbol.BatchNorm()()(Map("data" -> conv))
-      relu = Symbol.Activation()()(Map("data" -> bn, "act_type" -> "relu"))
+//      conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
+//          "num_filter" -> numFilter, "cudnn_off" -> true, "dilate" -> "(1, 1)"))
+      conv = Symbol.api.Convolution(relu, kernel = Shape(filterSize, 1), num_filter = numFilter, cudnn_off = true, dilate = Shape(1, 1))
+      bn = Symbol.api.BatchNorm(conv)
+      relu = Symbol.api.relu(bn)
    
       if (len > seqLen) {
-        val partOne = Symbol.slice_axis()()(
-            Map("data" -> relu, "axis" -> 2, "begin" -> 0, "end" -> (seqLen - 1)))
-        var partTwo = Symbol.slice_axis()()(
-            Map("data" -> relu, "axis" -> 2, "begin" -> (seqLen - 1), "end" -> len))
-        partTwo = Symbol.Flatten()(partTwo)()
-        partTwo = Symbol.FullyConnected()()(Map("data" -> partTwo, "num_hidden" -> newNumFilter))
-        partTwo = Symbol.Reshape()()(Map("data" -> partTwo, "target_shape" -> s"($batchSize, $numFilter, 1, 1)"))
-        Symbol.Concat()(partOne, partTwo)(Map("dim" -> 2))
+//        val partOne = Symbol.slice_axis()()(
+//            Map("data" -> relu, "axis" -> 2, "begin" -> 0, "end" -> (seqLen - 1)))
+        val partOne = Symbol.api.slice_axis(relu, axis = 2, begin = 0, end = (seqLen - 1))
+        var partTwo = Symbol.api.slice_axis(relu, axis = 2, begin = (seqLen - 1), end = len)
+        partTwo = Symbol.api.Flatten(partTwo)
+        partTwo = Symbol.api.FullyConnected(partTwo, num_hidden = newNumFilter)
+        partTwo = Symbol.api.Reshape(partTwo, target_shape = Shape(batchSize, numFilter, 1, 1))
+        Symbol.api.Concat(Array(partOne, partTwo), num_args = 2, dim = 2)
       } else relu
     }
     
     val lstmInputs = {
-      val concats = Symbol.Concat()(windowSeqOutputs: _*)(Map("dim" -> 1))
-      Symbol.SliceChannel()(concats)(Map("axis" -> 2, "num_outputs" -> seqLen, "squeeze_axis" -> 1))
+      val concats = Symbol.api.Concat(windowSeqOutputs, num_args = windowSeqOutputs.length, dim = 1)
+      Symbol.api.SliceChannel(concats, axis = 2, num_outputs = seqLen, squeeze_axis = true)
     }
     
     // bi-lstm
@@ -159,7 +176,7 @@ object AC_BLSTM_TextClassification {
         forwardLastStates(i) = nextState
       }
       //  add dropout before softmax
-      if (dropout > 0f) hidden = Symbol.Dropout()()(Map("data" -> hidden, "p" -> dropout))
+      if (dropout > 0f) hidden = Symbol.api.Dropout(hidden, p = dropout)
       forwardHiddenAll = forwardHiddenAll :+ hidden
     }
 
@@ -180,18 +197,18 @@ object AC_BLSTM_TextClassification {
         backwardLastStates(i) = nextState
       }
       //  add dropout before softmax
-      if (dropout > 0f) hidden = Symbol.Dropout()()(Map("data" -> hidden, "p" -> dropout))
+      if (dropout > 0f) hidden = Symbol.api.Dropout(hidden, p = dropout)
       badkwardHiddenAll =  hidden +: badkwardHiddenAll
     }
 
     val syms = forwardHiddenAll.zip(badkwardHiddenAll).map { case (f, b) =>
-      var tmp = Symbol.Concat()(f, b)(Map("dim" -> 1))
-      Symbol.Dropout()()(Map("data" -> tmp, "p" -> 0.5f))
+      var tmp = Symbol.api.Concat(Array(f, b), num_args = 2, dim = 1)
+      Symbol.api.Dropout(tmp, p = 0.5f)
     }
 
-    var hiddenConcat = Symbol.Concat()(syms: _*)(Map("dim" -> 1))
-    val fc = Symbol.FullyConnected()()(Map("data" -> hiddenConcat, "num_hidden" -> numLabel))
-    val sm = Symbol.SoftmaxOutput()()(Map("data" -> fc, "label" -> inputY))
+    var hiddenConcat = Symbol.api.Concat(syms, num_args = syms.length, dim = 1)
+    val fc = Symbol.api.FullyConnected(hiddenConcat, num_hidden = numLabel)
+    val sm = Symbol.api.SoftmaxOutput(fc, label = inputY)
     sm
   }
 
