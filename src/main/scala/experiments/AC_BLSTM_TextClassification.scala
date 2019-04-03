@@ -25,9 +25,8 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.mxnet.util.OptionConversion._
 
 /**
- * An Implementation of the paper
+ * Implementation of the paper
  * AC-BLSTM: Asymmetric Convolutional Bidirectional LSTM Networks for Text Classification
- * by Depeng Liang and Yongdong Zhang
  *
  * @author Depeng Liang
  */
@@ -54,36 +53,23 @@ object AC_BLSTM_TextClassification {
 
     val inDataa = {
       if (dropout > 0f) 
-//        Symbol.Dropout()()(Map("data" -> inData, "p" -> dropout))
         Symbol.api.Dropout(inData, dropout)
       else inData
     }
-//    val i2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_i2h")()(Map("data" -> inDataa,
-//                                                       "weight" -> param.i2hWeight,
-//                                                       "bias" -> param.i2hBias,
-//                                                       "num_hidden" -> numHidden * 4))
+
     val i2h = Symbol.api.FullyConnected(inDataa, param.i2hWeight, param.i2hBias, numHidden * 4, name = s"t${seqIdx}_l${layerIdx}_i2h")                                                   
-//    val h2h = Symbol.FullyConnected(s"t${seqIdx}_l${layerIdx}_h2h")()(Map("data" -> prevState.h,
-//                                                       "weight" -> param.h2hWeight,
-//                                                       "bias" -> param.h2hBias,
-//                                                       "num_hidden" -> numHidden * 4))
+
     val h2h = Symbol.api.FullyConnected(prevState.h, param.h2hWeight, param.h2hBias, numHidden * 4, name = s"t${seqIdx}_l${layerIdx}_h2h")
     
     val gates = i2h + h2h
-//    val sliceGates = Symbol.SliceChannel(s"t${seqIdx}_l${layerIdx}_slice")(gates)(Map("num_outputs" -> 4))
     
     val sliceGates = Symbol.api.SliceChannel(gates, num_outputs = 4, name = s"t${seqIdx}_l${layerIdx}_slice")
-    
-//    val ingate = Symbol.Activation()()(Map("data" -> sliceGates.get(0), "act_type" -> "sigmoid"))
+
     val ingate = Symbol.api.sigmoid(sliceGates.get(0))
-//    val inTransform = Symbol.Activation()()(Map("data" -> sliceGates.get(1), "act_type" -> "tanh"))
     val inTransform = Symbol.api.tanh(sliceGates.get(1))
-//    val forgetGate = Symbol.Activation()()(Map("data" -> sliceGates.get(2), "act_type" -> "sigmoid"))
     val forgetGate = Symbol.api.sigmoid(sliceGates.get(2))
-//    val outGate = Symbol.Activation()()(Map("data" -> sliceGates.get(3), "act_type" -> "sigmoid"))
     val outGate = Symbol.api.sigmoid(sliceGates.get(3))
     val nextC = (forgetGate * prevState.c) + (ingate * inTransform)
-//    val nextH = outGate * Symbol.Activation()()(Map("data" -> nextC, "act_type" -> "tanh"))
     val nextH = outGate * Symbol.api.tanh(nextC)
     LSTMState(c = nextC, h = nextH)
   }
@@ -103,23 +89,17 @@ object AC_BLSTM_TextClassification {
 
     val windowSeqOutputs = filterList.map { filterSize =>
       // inception v4 2 
-//      var conv = Symbol.Convolution()()(Map("data" -> inputX, "kernel" -> s"(1, $numEmbed)",
-//          "num_filter" -> numFilter, "cudnn_off" -> true))
       var conv = Symbol.api.Convolution(inputX, kernel = Shape(1, numEmbed), num_filter = numFilter, cudnn_off = true)
       var bn = Symbol.api.BatchNorm(conv)
       var relu = Symbol.api.relu(bn)
       
       val len = sentenceSize - filterSize + 1
      
-//      conv = Symbol.Convolution()()(Map("data" -> relu, "kernel" -> s"($filterSize, 1)",
-//          "num_filter" -> numFilter, "cudnn_off" -> true, "dilate" -> "(1, 1)"))
       conv = Symbol.api.Convolution(relu, kernel = Shape(filterSize, 1), num_filter = numFilter, cudnn_off = true, dilate = Shape(1, 1))
       bn = Symbol.api.BatchNorm(conv)
       relu = Symbol.api.relu(bn)
    
       if (len > seqLen) {
-//        val partOne = Symbol.slice_axis()()(
-//            Map("data" -> relu, "axis" -> 2, "begin" -> 0, "end" -> (seqLen - 1)))
         val partOne = Symbol.api.slice_axis(relu, axis = 2, begin = 0, end = (seqLen - 1))
         var partTwo = Symbol.api.slice_axis(relu, axis = 2, begin = (seqLen - 1), end = len)
         partTwo = Symbol.api.Flatten(partTwo)
@@ -317,7 +297,7 @@ object AC_BLSTM_TextClassification {
           model.cnnExec.backward()
 
           val tmpCorrect = {
-            val predLabel = NDArray.argmax_channel(model.cnnExec.outputs(0))
+            val predLabel = NDArray.api.argmax_channel(model.cnnExec.outputs(0))
             val result = predLabel.toArray.zip(batchL).map { predLabel =>
               if (predLabel._1 == predLabel._2) 1
               else 0
@@ -329,7 +309,7 @@ object AC_BLSTM_TextClassification {
           numCorrect = numCorrect + tmpCorrect
           val norm = Math.sqrt(paramBlocks.map { case (idx, weight, grad, state, name) =>
             val tmp = grad / batchSize
-            val l2Norm = NDArray.norm(tmp)
+            val l2Norm = NDArray.api.norm(tmp)
             val result = l2Norm.toScalar * l2Norm.toScalar
             l2Norm.dispose()
             tmp.dispose()
@@ -369,7 +349,7 @@ object AC_BLSTM_TextClassification {
             model.cnnExec.forward(isTrain = false)
 
             val tmpCorrect = {
-              val predLabel = NDArray.argmax_channel(model.cnnExec.outputs(0))
+              val predLabel = NDArray.api.argmax_channel(model.cnnExec.outputs(0))
               val result = predLabel.toArray.zip(batchL).map { predLabel =>
                 if (predLabel._1 == predLabel._2) 1
                 else 0
@@ -392,7 +372,7 @@ object AC_BLSTM_TextClassification {
         // decay learning rate
         if (iter % 50 == 0 && iter > 0) {
           factor *= 0.5f
-          opt.setLrScale(paramBlocks.map(_._1 -> factor).toMap)
+          opt.setLrMult(paramBlocks.map { x => Left(x._1) -> factor }.toMap)
           println(s"reset learning to ${opt.learningRate * factor}")
         }
       }
